@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #F6F7F9;
+    color: #0F172A;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* Diagonal hatched bar pattern for Bento Analytics Chart */
+.bg-hatched-emerald {
+  background-color: #ecfdf5;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(5, 150, 105, 0.25),
+    rgba(5, 150, 105, 0.25) 5px,
+    transparent 5px,
+    transparent 10px
+  );
+}
+
+.bg-hatched-indigo {
+  background-color: #eef2ff;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(79, 70, 229, 0.22),
+    rgba(79, 70, 229, 0.22) 5px,
+    transparent 5px,
+    transparent 10px
+  );
+}
+
+/* Subtle tech grid pattern for dark cards and conveyor */
+.bg-dark-circuit {
+  background-image: radial-gradient(rgba(99, 102, 241, 0.22) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+/* Clean enterprise scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F1F5F9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
