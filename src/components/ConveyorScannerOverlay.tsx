@@ -13,20 +13,31 @@ interface ConveyorScannerOverlayProps {
   isScanning: boolean;
   activeRuleCount: number;
   engineUsed: 'Gemini 2.5 Flash' | 'Built-in Deterministic Engine';
+  hasVisualAsset?: boolean;
 }
 
-const STEP_READOUTS = [
+const TEXT_STEP_READOUTS = [
   'Checking Product Canon (FACT-01 • CloudPulse v4.2)...',
   'Verifying SLA Claims & Tier Pricing (FACT-02 • FACT-03)...',
   'Auditing Enterprise Brand Tone & ROI Claims (TONE-01 • COMP-01)...',
+];
+
+const MULTIMODAL_STEP_READOUTS = [
+  'Checking Product Canon & Embedded Visual Copy (OCR / Vision)...',
+  'Auditing Brand Color Palette, Contrast & Visual Hierarchy...',
+  'Verifying SLA Claims, Pricing & Legal Disclosure Visibility...',
 ];
 
 export const ConveyorScannerOverlay: React.FC<ConveyorScannerOverlayProps> = ({
   isScanning,
   activeRuleCount,
   engineUsed,
+  hasVisualAsset = false,
 }) => {
   const [stepIndex, setStepIndex] = useState(0);
+  const stepReadouts = hasVisualAsset
+    ? MULTIMODAL_STEP_READOUTS
+    : TEXT_STEP_READOUTS;
 
   useEffect(() => {
     if (!isScanning) {
@@ -34,10 +45,10 @@ export const ConveyorScannerOverlay: React.FC<ConveyorScannerOverlayProps> = ({
       return;
     }
     const interval = setInterval(() => {
-      setStepIndex((prev) => (prev + 1) % STEP_READOUTS.length);
+      setStepIndex((prev) => (prev + 1) % stepReadouts.length);
     }, 680);
     return () => clearInterval(interval);
-  }, [isScanning]);
+  }, [isScanning, stepReadouts.length]);
 
   return (
     <AnimatePresence>
@@ -75,7 +86,7 @@ export const ConveyorScannerOverlay: React.FC<ConveyorScannerOverlayProps> = ({
               className="flex items-center gap-2 text-xs font-mono text-emerald-300 bg-emerald-500/15 border border-emerald-400/30 px-3 py-1 rounded-full"
             >
               <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>{STEP_READOUTS[stepIndex]}</span>
+              <span>{stepReadouts[stepIndex]}</span>
             </motion.div>
           </div>
 
@@ -186,7 +197,7 @@ export const ConveyorScannerOverlay: React.FC<ConveyorScannerOverlayProps> = ({
               Scanning manuscript against canonical CloudPulse Truth Sheet...
             </span>
             <span className="text-indigo-300">
-              Step {stepIndex + 1} / {STEP_READOUTS.length}
+              Step {stepIndex + 1} / {stepReadouts.length}
             </span>
           </div>
         </motion.div>

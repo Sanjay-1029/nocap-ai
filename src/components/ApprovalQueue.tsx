@@ -15,31 +15,122 @@ import {
   UserCheck,
   Download,
   Award,
+  FileCheck2,
+  FileJson,
+  Loader2,
+  Lock,
 } from 'lucide-react';
-import { QueuedSubmission } from '../types';
+import {
+  BrandRule,
+  QueuedSubmission,
+  UserRole,
+  WebhookConfig,
+  WebhookDispatchLog,
+} from '../types';
+import {
+  buildComplianceCertificate,
+  downloadAuditCertificateJson,
+  downloadAuditCertificatePdf,
+} from '../utils/auditCertificate';
+import { PublishingGatePanel } from './PublishingGatePanel';
 
 interface ApprovalQueueProps {
   submissions: QueuedSubmission[];
-  onApproveAndPublish: (submissionId: string) => void;
+  rules: BrandRule[];
+  activeRole: UserRole;
+  webhookConfig: WebhookConfig;
+  onUpdateWebhookUrl: (url: string) => void;
+  onRecordWebhookDispatch: (submissionId: string, log: WebhookDispatchLog) => void;
+  onSwitchRole: (role: UserRole) => void;
+  onApproveAndPublish: (submissionId: string) => Promise<void> | void;
   onRequestChanges: (submissionId: string, commentText: string) => void;
   onAddComment: (submissionId: string, commentText: string) => void;
   onBackToStudio: () => void;
+  onLoadSampleCampaign: () => void;
 }
 
 export const ApprovalQueue: React.FC<ApprovalQueueProps> = ({
   submissions,
+  rules,
+  activeRole,
+  webhookConfig,
+  onUpdateWebhookUrl,
+  onRecordWebhookDispatch,
+  onSwitchRole,
   onApproveAndPublish,
   onRequestChanges,
   onAddComment,
   onBackToStudio,
+  onLoadSampleCampaign,
 }) => {
+  const canReviewOrApprove =
+    activeRole === 'Brand Reviewer' || activeRole === 'Compliance Admin';
+  const activeRules = rules.filter((r) => r.enabled);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [exportedId, setExportedId] = useState<string | null>(null);
+  const [certStatusById, setCertStatusById] = useState<Record<string, string>>({});
   const [stampedId, setStampedId] = useState<string | null>(null);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(
     submissions[0]?.id || null
   );
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
+
+  const handleDownloadPacketCertificate = async (
+    sub: QueuedSubmission,
+    format: 'pdf' | 'json'
+  ) => {
+    const key = `${sub.id}-${format}`;
+    setCertStatusById((prev) => ({ ...prev, [key]: 'generating' }));
+    try {
+      const activeRules = rules.filter((r) => r.enabled);
+      const workflowStage =
+        sub.status === 'PUBLISHED'
+          ? 'Manager Sign-Off Completed'
+          : sub.status === 'CHANGES_REQUESTED'
+          ? 'Reviewer Revision Requested'
+          : 'Reviewer Audit (Pending Manager Sign-Off)';
+
+      const cert = await buildComplianceCertificate({
+        documentTitle: sub.title,
+        originalDraft: sub.originalDraft,
+        remediatedDraft: sub.finalDraft,
+        initialScore: sub.initialScore,
+        finalScore: sub.finalScore,
+        engineUsed: sub.engineUsed,
+        activeRules,
+        violations: sub.resolvedViolations,
+        workflowStage,
+        workflowStatus: sub.status,
+        signerRole: activeRole,
+        signedOffAtUtc: sub.publishedAt ? new Date().toISOString() : null,
+        reviewerComments: sub.comments,
+        auditEventCount: sub.auditTrail.length,
+        visualAsset: sub.visualAsset ?? null,
+      });
+
+      if (format === 'pdf') {
+        downloadAuditCertificatePdf(cert);
+      } else {
+        downloadAuditCertificateJson(cert);
+      }
+
+      setCertStatusById((prev) => ({ ...prev, [key]: 'done' }));
+      setTimeout(() => {
+        setCertStatusById((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }, 2200);
+    } catch {
+      setCertStatusById((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  };
 
   const handleCopyFinal = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -82,10 +173,16 @@ export const ApprovalQueue: React.FC<ApprovalQueueProps> = ({
     setTimeout(() => setExportedId(null), 2000);
   };
 
-  const handleApproveClick = (id: string) => {
-    setStampedId(id);
-    onApproveAndPublish(id);
-    setTimeout(() => setStampedId(null), 2400);
+  const handleApproveClick = async (id: string) => {
+    if (!canReviewOrApprove || approvingId) return;
+    setApprovingId(id);
+    try {
+      await onApproveAndPublish(id);
+      setStampedId(id);
+      setTimeout(() => setStampedId(null), 2400);
+    } finally {
+      setApprovingId(null);
+    }
   };
 
   const handleCommentSubmit = (id: string) => {
@@ -137,14 +234,32 @@ export const ApprovalQueue: React.FC<ApprovalQueueProps> = ({
 
       {/* Submissions List */}
       {submissions.length === 0 ? (
-        <div className="bg-white rounded-[20px] border border-slate-200 p-12 text-center shadow-card">
-          <ShieldCheck className="w-10 h-10 text-indigo-600 mx-auto mb-3" />
-          <h3 className="text-base font-semibold text-slate-900">
-            No Submissions in Approval Queue
-          </h3>
-          <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-            Verify a draft in the Content Scanner, apply fixes, and click &ldquo;Submit to Approval Center&rdquo;.
-          </p>
+        <div className="bg-white rounded-[20px] border border-slate-200 p-12 text-center shadow-card space-y-4">
+          <ShieldCheck className="w-10 h-10 text-indigo-600 mx-auto" />
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">
+              No Submissions in Approval Queue
+            </h3>
+            <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+              Verify a draft in the Content Scanner, apply fixes, and click &ldquo;Submit to Approval Center&rdquo; — or load a sample campaign immediately.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2.5">
+            <button
+              type="button"
+              onClick={onLoadSampleCampaign}
+              className="px-4 py-2 rounded-full text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors"
+            >
+              Load Sample Campaign
+            </button>
+            <button
+              type="button"
+              onClick={onBackToStudio}
+              className="px-4 py-2 rounded-full text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+            >
+              Go to Content Scanner
+            </button>
+          </div>
         </div>
       ) : (
         <div className="space-y-6">
@@ -375,9 +490,51 @@ export const ApprovalQueue: React.FC<ApprovalQueueProps> = ({
                         ) : (
                           <>
                             <Download className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Export Approved Text</span>
+                            <span>Export .TXT</span>
                           </>
                         )}
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={certStatusById[`${sub.id}-pdf`] === 'generating'}
+                        onClick={() => handleDownloadPacketCertificate(sub, 'pdf')}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white shadow-xs flex items-center gap-1.5 disabled:opacity-60"
+                        title="Download signed PDF Compliance Audit Certificate with SHA-256 hashes"
+                      >
+                        {certStatusById[`${sub.id}-pdf`] === 'generating' ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                        ) : certStatusById[`${sub.id}-pdf`] === 'done' ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        ) : (
+                          <FileCheck2 className="w-3.5 h-3.5 text-emerald-400" />
+                        )}
+                        <span>
+                          {certStatusById[`${sub.id}-pdf`] === 'done'
+                            ? 'PDF Certificate Saved!'
+                            : 'Download Audit Certificate'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={certStatusById[`${sub.id}-json`] === 'generating'}
+                        onClick={() => handleDownloadPacketCertificate(sub, 'json')}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 shadow-xs flex items-center gap-1.5 disabled:opacity-60"
+                        title="Download machine-readable JSON Audit Proof"
+                      >
+                        {certStatusById[`${sub.id}-json`] === 'generating' ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                        ) : certStatusById[`${sub.id}-json`] === 'done' ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        ) : (
+                          <FileJson className="w-3.5 h-3.5 text-indigo-600" />
+                        )}
+                        <span>
+                          {certStatusById[`${sub.id}-json`] === 'done'
+                            ? 'JSON Saved!'
+                            : 'JSON Proof'}
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -548,36 +705,71 @@ export const ApprovalQueue: React.FC<ApprovalQueueProps> = ({
                         </button>
                       </div>
 
-                      <div className="flex items-center gap-2.5">
-                        {!isPublished && (
-                          <button
-                            type="button"
-                            onClick={() => handleRequestChangesClick(sub.id)}
-                            className="px-3.5 py-2 rounded-full text-xs font-semibold bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 transition-colors flex items-center gap-1.5"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            <span>Request Changes</span>
-                          </button>
-                        )}
-
-                        {isPublished ? (
-                          <div className="px-4 py-2 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold flex items-center gap-1.5">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            <span>Approved &amp; Published ({sub.publishedAt})</span>
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        {!isPublished && !canReviewOrApprove ? (
+                          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                            <Lock className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Reviewer sign-off required</span>
+                            <button
+                              type="button"
+                              onClick={() => onSwitchRole('Brand Reviewer')}
+                              className="font-semibold text-indigo-700 hover:underline ml-1"
+                            >
+                              Switch to Brand Reviewer
+                            </button>
                           </div>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleApproveClick(sub.id)}
-                            className="px-4 py-2 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors flex items-center gap-1.5"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                            <span>Approve &amp; Publish</span>
-                          </button>
+                          <>
+                            {!isPublished && (
+                              <button
+                                type="button"
+                                disabled={approvingId !== null}
+                                onClick={() => handleRequestChangesClick(sub.id)}
+                                className="px-3.5 py-2 rounded-full text-xs font-semibold bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>Request Changes</span>
+                              </button>
+                            )}
+
+                            {isPublished ? (
+                              <div className="px-4 py-2 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                <span>
+                                  Approved by {sub.approvedByRole || 'Reviewer'} ({sub.publishedAt})
+                                </span>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={approvingId !== null}
+                                onClick={() => handleApproveClick(sub.id)}
+                                className="px-4 py-2 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors flex items-center gap-1.5 disabled:opacity-60"
+                              >
+                                {approvingId === sub.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Send className="w-3.5 h-3.5" />
+                                )}
+                                <span>Approve &amp; Sign Off</span>
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
                   </div>
+
+                  {/* Outbound Webhook Publishing Gate (Strict 100% Score + Human Sign-Off Enforcement) */}
+                  <PublishingGatePanel
+                    submission={sub}
+                    activeRules={activeRules}
+                    activeRole={activeRole}
+                    webhookConfig={webhookConfig}
+                    onUpdateWebhookUrl={onUpdateWebhookUrl}
+                    onRecordWebhookDispatch={onRecordWebhookDispatch}
+                    onSwitchRole={onSwitchRole}
+                  />
                 </div>
               </motion.article>
             );

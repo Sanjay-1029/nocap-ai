@@ -11,6 +11,11 @@ import {
   BookOpen,
   Info,
   X,
+  FileCheck2,
+  FileJson,
+  Layers,
+  Loader2,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { Violation, Severity, BrandRule } from '../types';
 
@@ -22,12 +27,19 @@ interface ViolationPanelProps {
   isScanning: boolean;
   hoveredViolationId: string | null;
   onHoverViolation: (id: string | null) => void;
-  onApplyFix: (violationId: string, customFixText?: string, isHumanEdited?: boolean) => void;
+  onApplyFix: (
+    violationId: string,
+    customFixText?: string,
+    isHumanEdited?: boolean
+  ) => void;
   onUpdateViolationFix: (violationId: string, newFixText: string) => void;
   onOverrideViolation: (violationId: string) => void;
   onQuickFixAll: () => void;
   onSendToQueue: () => void;
+  onDownloadCertificate: (format: 'pdf' | 'json') => Promise<void>;
   onOpenKnowledgeBase: () => void;
+  onLoadSampleCampaign?: () => void;
+  isEmptyDraft?: boolean;
   isSubmittedToast: boolean;
 }
 
@@ -44,18 +56,29 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
   onOverrideViolation,
   onQuickFixAll,
   onSendToQueue,
+  onDownloadCertificate,
   onOpenKnowledgeBase,
+  onLoadSampleCampaign,
+  isEmptyDraft = false,
   isSubmittedToast,
 }) => {
   const [editingFixId, setEditingFixId] = useState<string | null>(null);
   const [draftFixValues, setDraftFixValues] = useState<Record<string, string>>({});
   const [inspectedRuleCode, setInspectedRuleCode] = useState<string | null>(null);
+  const [exportingFormat, setExportingFormat] = useState<'pdf' | 'json' | null>(null);
+  const [exportedFeedback, setExportedFeedback] = useState<string | null>(null);
 
   const openViolations = violations.filter((v) => v.status === 'open');
   const resolvedViolations = violations.filter((v) => v.status !== 'open');
 
+  const totalOpenSpans = openViolations.reduce(
+    (sum, v) => sum + (v.occurrenceCount || v.occurrences?.length || 1),
+    0
+  );
+
   const isZeroRules = activeRuleCount === 0;
-  const canSendToQueue = !isZeroRules && openViolations.length === 0;
+  const canSendToQueue =
+    !isZeroRules && !isEmptyDraft && openViolations.length === 0;
 
   // Circular SVG gauge geometry
   const radius = 28;
@@ -63,7 +86,24 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
   const effectiveScore = isZeroRules ? 0 : trustScore;
   const strokeDashoffset = circumference - (effectiveScore / 100) * circumference;
 
-  const isCompliant = !isZeroRules && effectiveScore >= 90 && openViolations.length === 0;
+  const isCompliant =
+    !isZeroRules && effectiveScore >= 90 && openViolations.length === 0;
+
+  const handleCertDownload = async (format: 'pdf' | 'json') => {
+    if (exportingFormat) return;
+    setExportingFormat(format);
+    try {
+      await onDownloadCertificate(format);
+      setExportedFeedback(
+        format === 'pdf'
+          ? 'Signed PDF Certificate downloaded'
+          : 'Machine-readable JSON Proof downloaded'
+      );
+      setTimeout(() => setExportedFeedback(null), 2600);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
 
   const getScoreTheme = () => {
     if (isZeroRules) {
@@ -128,6 +168,7 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
   };
 
   const handleApplyClick = (v: Violation) => {
+    if (v.status !== 'open') return;
     const pendingEdit = draftFixValues[v.id];
     const finalFix =
       pendingEdit !== undefined && pendingEdit.trim()
@@ -142,10 +183,10 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
   const inspectedRule = rules.find((r) => r.code === inspectedRuleCode);
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-card flex flex-col h-full min-h-[540px] overflow-hidden">
+    <div className="bg-white rounded-[20px] border border-slate-200 shadow-card flex flex-col h-full min-h-[540px] overflow-hidden">
       {/* Top Brand Trust Score Summary Header */}
       <div className="p-5 border-b border-slate-200 bg-white shrink-0">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3.5 min-w-0">
             {/* Circular SVG Gauge */}
             <div className="relative w-16 h-16 flex items-center justify-center shrink-0">
@@ -193,20 +234,21 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
                   ? 'No active governance rules are currently enforced.'
                   : openViolations.length === 0
                   ? `Verified against ${activeRuleCount} active brand rules.`
-                  : `${openViolations.length} open issue(s) • ${resolvedViolations.length} resolved`}
+                  : `${openViolations.length} open rule(s) • ${totalOpenSpans} total span(s) • ${resolvedViolations.length} resolved`}
               </p>
             </div>
           </div>
 
           {/* Top-Level Apply All Fixes Button */}
-          {openViolations.length > 1 && !isZeroRules && (
+          {openViolations.length > 0 && !isZeroRules && (
             <button
               type="button"
               onClick={onQuickFixAll}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors flex items-center gap-1.5 shrink-0"
+              title="Apply fixes across all matching spans in the entire document"
             >
               <Wand2 className="w-3.5 h-3.5" />
-              <span>Apply All ({openViolations.length})</span>
+              <span>Apply All ({totalOpenSpans})</span>
             </button>
           )}
         </div>
@@ -293,6 +335,29 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
               <span>Open Brand Knowledge Base</span>
             </button>
           </div>
+        ) : isEmptyDraft ? (
+          <div className="bg-white rounded-xl border border-slate-200 p-6 text-center space-y-3 my-4 shadow-xs">
+            <div className="w-10 h-10 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600 mx-auto">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-slate-900">
+                No Campaign Content to Audit
+              </h4>
+              <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto leading-relaxed">
+                Paste text, upload a document (PDF/DOCX/TXT), attach a visual creative, or load our sample campaign to test live governance.
+              </p>
+            </div>
+            {onLoadSampleCampaign && (
+              <button
+                type="button"
+                onClick={onLoadSampleCampaign}
+                className="px-4 py-2 rounded-full text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors"
+              >
+                Load Sample Campaign
+              </button>
+            )}
+          </div>
         ) : violations.length === 0 ? (
           <div className="bg-white rounded-xl border border-emerald-200 p-6 text-center space-y-2.5 my-4 shadow-xs">
             <div className="w-10 h-10 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 mx-auto">
@@ -302,13 +367,14 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
               100% Brand &amp; Policy Compliant
             </h4>
             <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
-              No factual, pricing, SLA, or tone-of-voice violations were found across {activeRuleCount} active rules.
+              No factual, pricing, SLA, or tone-of-voice violations were found across {activeRuleCount} active rules. Ready for signed audit certificate export.
             </p>
           </div>
         ) : (
           <AnimatePresence mode="popLayout">
             {violations.map((v) => {
               const isResolved = v.status !== 'open';
+              const isVisual = v.source === 'VISUAL';
               const isEditingThisFix = editingFixId === v.id;
               const currentFixValue =
                 draftFixValues[v.id] !== undefined
@@ -317,6 +383,15 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
               const isHumanCustomized =
                 Boolean(v.isHumanEdited) || currentFixValue.trim() !== v.suggestedFix;
               const isHovered = hoveredViolationId === v.id;
+
+              const occCount =
+                v.appliedReplacementCount ||
+                v.occurrenceCount ||
+                v.occurrences?.length ||
+                1;
+              const uniqueLines = Array.from(
+                new Set((v.occurrences || []).map((o) => o.lineNumber))
+              );
 
               return (
                 <motion.div
@@ -333,18 +408,31 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
                     isResolved
                       ? 'border-emerald-200 bg-emerald-50/20'
                       : isHovered
-                      ? 'border-indigo-400 shadow-md ring-2 ring-indigo-500/10'
+                      ? isVisual
+                        ? 'border-violet-400 shadow-md ring-2 ring-violet-500/15'
+                        : 'border-indigo-400 shadow-md ring-2 ring-indigo-500/10'
+                      : isVisual
+                      ? 'border-violet-200/90 shadow-xs hover:border-violet-300'
                       : 'border-slate-200 shadow-xs hover:border-slate-300'
                   }`}
                 >
-                  {/* Card Header: Severity Pill + Rule ID Badge + View Rule Link */}
+                  {/* Card Header: VISUAL AUDIT / Severity Pill + Rule ID + Occurrence Badge + View Rule */}
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {isVisual && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 border border-violet-300">
+                          <ImageIcon className="w-2.5 h-2.5 text-violet-700" />
+                          VISUAL AUDIT
+                        </span>
+                      )}
+
                       {isResolved ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                           <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                           {v.status === 'overridden'
                             ? 'Ignored / Overridden'
+                            : isVisual
+                            ? 'Visual Remediated'
                             : v.isHumanEdited
                             ? 'Human-Edited Fix'
                             : 'Fixed'}
@@ -364,53 +452,134 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
                         {v.ruleCode}
                       </span>
 
-                      <span className="text-xs font-semibold text-slate-800">
-                        {v.ruleTitle}
-                      </span>
+                      {/* Occurrence Count Badge (for text spans) */}
+                      {!isVisual && (
+                        <span
+                          className={`inline-flex items-center gap-1 text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full border ${
+                            isResolved
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : occCount > 1
+                              ? 'bg-rose-50 text-rose-700 border-rose-200'
+                              : 'bg-slate-50 text-slate-600 border-slate-200'
+                          }`}
+                        >
+                          <Layers className="w-2.5 h-2.5" />
+                          {isResolved
+                            ? `${occCount} ${occCount === 1 ? 'span' : 'spans'} remediated`
+                            : `${occCount} ${occCount === 1 ? 'occurrence' : 'occurrences'} found`}
+                        </span>
+                      )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setInspectedRuleCode((curr) =>
-                          curr === v.ruleCode ? null : v.ruleCode
-                        )
-                      }
-                      className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
-                    >
-                      <Info className="w-3 h-3" />
-                      <span>View Rule</span>
-                    </button>
+                    {rules.some((r) => r.code === v.ruleCode) && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setInspectedRuleCode((curr) =>
+                            curr === v.ruleCode ? null : v.ruleCode
+                          )
+                        }
+                        className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                      >
+                        <Info className="w-3 h-3" />
+                        <span>View Rule</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Rule Title + Visual Element Reference or Indexed Line Numbers */}
+                  <div className="mt-1.5 flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-xs font-semibold text-slate-900">
+                      {v.ruleTitle}
+                    </span>
+                    {isVisual && v.visualElement ? (
+                      <span className="text-[10px] font-mono text-violet-700 bg-violet-50 px-2 py-0.5 rounded border border-violet-200">
+                        {v.visualElement}
+                      </span>
+                    ) : uniqueLines.length > 0 ? (
+                      <span className="text-[10px] font-mono text-slate-500">
+                        {uniqueLines.length === 1
+                          ? `Line ${uniqueLines[0]}`
+                          : `Lines ${uniqueLines.join(', ')}`}
+                      </span>
+                    ) : null}
                   </div>
 
                   {/* Plain-English Explanation */}
-                  <p className="mt-2 text-xs text-slate-600 leading-relaxed">
+                  <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
                     {v.explanation}
                   </p>
 
-                  {/* Offending Phrase & Inline-Editable Suggested Correction Box */}
+                  {/* Sampled Color Swatches (for Visual Palette Findings) */}
+                  {isVisual && v.detectedColors && v.detectedColors.length > 0 && (
+                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-mono text-slate-500 uppercase">
+                        Detected Swatches:
+                      </span>
+                      {v.detectedColors.map((hex) => (
+                        <span
+                          key={hex}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-50 border border-slate-200 text-[10px] font-mono text-slate-700"
+                        >
+                          <span
+                            className="w-2.5 h-2.5 rounded-full border border-slate-300"
+                            style={{ backgroundColor: hex }}
+                          />
+                          {hex}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Offending Phrase / Visual Element & Inline-Editable Remediation Guidance Box */}
                   <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2 text-xs">
                     <div className="flex items-start gap-2">
-                      <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-mono text-[10px] font-semibold uppercase shrink-0">
-                        Flagged
-                      </span>
                       <span
-                        className={`font-mono break-words ${
-                          isResolved
-                            ? 'line-through text-slate-400'
-                            : 'text-rose-700 font-medium'
+                        className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold uppercase shrink-0 ${
+                          isVisual
+                            ? 'bg-violet-100 text-violet-800'
+                            : 'bg-rose-100 text-rose-700'
                         }`}
                       >
-                        &ldquo;{v.offendingPhrase}&rdquo;
+                        {isVisual ? 'Visual Finding' : 'Flagged'}
                       </span>
+                      <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                        {v.matchedPhrases && v.matchedPhrases.length > 1 ? (
+                          v.matchedPhrases.map((phrase, idx) => (
+                            <span
+                              key={idx}
+                              className={`font-mono break-words ${
+                                isResolved
+                                  ? 'line-through text-slate-400'
+                                  : 'text-rose-700 font-medium'
+                              }`}
+                            >
+                              &ldquo;{phrase}&rdquo;
+                              {idx < v.matchedPhrases!.length - 1 ? ',' : ''}
+                            </span>
+                          ))
+                        ) : (
+                          <span
+                            className={`font-mono break-words ${
+                              isResolved
+                                ? 'line-through text-slate-400'
+                                : isVisual
+                                ? 'text-violet-900 font-medium'
+                                : 'text-rose-700 font-medium'
+                            }`}
+                          >
+                            {isVisual ? v.offendingPhrase : `"${v.offendingPhrase}"`}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Editable Suggested Fix */}
+                    {/* Editable Suggested Fix / Actionable Visual Remediation Guidance */}
                     <div className="pt-2 border-t border-slate-200/80">
                       <div className="flex items-center justify-between gap-2 mb-1">
                         <div className="flex items-center gap-1.5">
                           <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-mono text-[10px] font-semibold uppercase shrink-0">
-                            Suggested Fix
+                            {isVisual ? 'Remediation Guidance' : 'Suggested Fix'}
                           </span>
                           {isHumanCustomized && (
                             <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
@@ -428,7 +597,13 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
                             className="text-[11px] font-medium text-slate-500 hover:text-indigo-600 flex items-center gap-1"
                           >
                             <Edit3 className="w-3 h-3" />
-                            <span>{isEditingThisFix ? 'Done' : 'Edit Rewrite'}</span>
+                            <span>
+                              {isEditingThisFix
+                                ? 'Done'
+                                : isVisual
+                                ? 'Edit Note'
+                                : 'Edit Rewrite'}
+                            </span>
                           </button>
                         )}
                       </div>
@@ -461,7 +636,7 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
                             !isResolved ? 'cursor-text hover:underline decoration-dotted' : ''
                           }`}
                         >
-                          &ldquo;{currentFixValue}&rdquo;
+                          {isVisual ? currentFixValue : `"${currentFixValue}"`}
                         </div>
                       )}
                     </div>
@@ -481,10 +656,24 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
                       <button
                         type="button"
                         onClick={() => handleApplyClick(v)}
-                        className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors flex items-center gap-1.5"
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white shadow-xs transition-colors flex items-center gap-1.5 ${
+                          isVisual
+                            ? 'bg-violet-600 hover:bg-violet-700'
+                            : 'bg-indigo-600 hover:bg-indigo-700'
+                        }`}
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>{isHumanCustomized ? 'Apply Custom Fix' : 'Apply Fix'}</span>
+                        <span>
+                          {isVisual
+                            ? 'Mark Visual Remediated'
+                            : isHumanCustomized
+                            ? occCount > 1
+                              ? `Apply Custom Fix (All ${occCount})`
+                              : 'Apply Custom Fix'
+                            : occCount > 1
+                            ? `Apply Fix (All ${occCount})`
+                            : 'Apply Fix'}
+                        </span>
                       </button>
                     </div>
                   )}
@@ -495,34 +684,76 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
         )}
       </div>
 
-      {/* Bottom Footer CTA: Submit to Approval Center */}
-      <div className="p-4 bg-white border-t border-slate-200 shrink-0">
+      {/* Bottom Footer CTAs: Download Signed Audit Certificate (PDF & JSON) + Submit to Approval Center */}
+      <div className="p-4 bg-white border-t border-slate-200 space-y-2.5 shrink-0">
+        {canSendToQueue && (
+          <div className="space-y-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+              <button
+                type="button"
+                disabled={exportingFormat !== null}
+                onClick={() => handleCertDownload('pdf')}
+                className="sm:col-span-8 py-2 px-3 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white shadow-xs transition-colors flex items-center justify-center gap-1.5 disabled:opacity-60"
+              >
+                {exportingFormat === 'pdf' ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <FileCheck2 className="w-3.5 h-3.5 text-emerald-400" />
+                )}
+                <span>Download Audit Certificate (PDF)</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={exportingFormat !== null}
+                onClick={() => handleCertDownload('json')}
+                className="sm:col-span-4 py-2 px-3 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-60"
+                title="Download machine-readable JSON audit proof with SHA-256 hashes"
+              >
+                {exportingFormat === 'json' ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <FileJson className="w-3.5 h-3.5 text-indigo-600" />
+                )}
+                <span>JSON Proof</span>
+              </button>
+            </div>
+            {exportedFeedback && (
+              <div className="text-[11px] font-medium text-emerald-700 text-center">
+                ✓ {exportedFeedback} (SHA-256 signed)
+              </div>
+            )}
+          </div>
+        )}
+
         <button
           type="button"
-          disabled={!canSendToQueue}
+          disabled={!canSendToQueue || isSubmittedToast || isScanning}
           onClick={onSendToQueue}
           className={`w-full py-2.5 px-4 rounded-lg text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
-            canSendToQueue
+            canSendToQueue && !isSubmittedToast && !isScanning
               ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm cursor-pointer'
               : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
           }`}
         >
           {isSubmittedToast ? (
             <>
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Submitted to Approval Center!</span>
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+              <span className="text-emerald-700">Opening Approval Center &amp; Publishing Gate...</span>
             </>
+          ) : isEmptyDraft ? (
+            <span>Add draft text or a visual asset to scan &amp; submit</span>
           ) : isZeroRules ? (
             <span>Enable at least 1 rule in Knowledge Base to submit</span>
           ) : canSendToQueue ? (
             <>
               <Send className="w-4 h-4" />
-              <span>Submit to Approval Center</span>
+              <span>Submit to Approval Center &amp; Publishing Gate</span>
             </>
           ) : (
             <span>
               Resolve {openViolations.length} remaining{' '}
-              {openViolations.length === 1 ? 'issue' : 'issues'} to unlock approval submission
+              {openViolations.length === 1 ? 'rule' : 'rules'} ({totalOpenSpans} spans) to unlock approval &amp; certificate
             </span>
           )}
         </button>

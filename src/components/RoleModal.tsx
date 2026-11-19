@@ -38,16 +38,16 @@ const ROLE_OPTIONS: {
     role: 'Brand Reviewer',
     badge: 'Stage 02 • Policy Audit',
     description:
-      'Manage canonical rules in the Brand Knowledge Base, inspect phrase-level diffs, add review notes, or request changes.',
-    permissions: ['Edit Truth Sheet rules', 'Audit Before/After diffs', 'Request revisions'],
+      'Inspect side-by-side audit diffs, verify AI vs. Human-Edited remediations, request revisions, or grant human sign-off approval.',
+    permissions: ['Audit Before/After diffs', 'Request revisions', 'Grant sign-off approval'],
     icon: <ShieldAlert className="w-5 h-5 text-amber-600" />,
   },
   {
-    role: 'Compliance Manager',
-    badge: 'Stage 03 • Final Sign-Off',
+    role: 'Compliance Admin',
+    badge: 'Stage 03 • Governance & Release',
     description:
-      'Oversee executive Bento telemetry, review audit trails of AI vs. human-edited fixes, and issue final publication sign-off.',
-    permissions: ['Approve & Publish releases', 'Full Bento & Analytics view', 'Export verified copy'],
+      'Edit canonical Brand Truth Sheet rules, configure outbound Webhook endpoints, and issue cryptographic publishing release tokens.',
+    permissions: ['Edit Truth Sheet rules', 'Configure Webhook endpoints', 'Issue rel_... release tokens'],
     icon: <UserCheck className="w-5 h-5 text-emerald-600" />,
   },
 ];

@@ -40,7 +40,7 @@ interface NavbarProps {
 const ALL_ROLES: UserRole[] = [
   'Content Creator',
   'Brand Reviewer',
-  'Compliance Manager',
+  'Compliance Admin',
 ];
 
 export const Navbar: React.FC<NavbarProps> = ({
