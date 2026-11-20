@@ -68,7 +68,7 @@ Leave `.env.local` empty for zero-config **Live Multi-Tab Sync**, or provide `VI
 ```bash
 npm run dev
 ```
-Open **http://localhost:5173/** in your browser.
+Open **WWW.nocapai.xyz** in your browser.
 
 ### 5. Build for Production
 ```bash
